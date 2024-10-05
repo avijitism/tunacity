@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunacity - Music Recognition</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;500;700&display=swap');
+
+        body {
+            margin: 0;
+            font-family: 'Orbitron', sans-serif;
+            background: radial-gradient(circle at 50% 50%, #1e1e2f, #0d0d1f);
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .player-container {
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 15px;
+            box-shadow: 0px 0px 40px rgba(0, 0, 0, 0.8);
+            padding: 30px 20px;
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+            animation: fadeInUp 1.5s ease-out;
+            backdrop-filter: blur(12px);
+        }
+
+        .player-header {
+            margin-bottom: 20px;
+        }
+
+        .neon-text {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 3rem;
+            color: #00ffcc;
+            text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc, 0 0 30px #00ffcc;
+            animation: flicker 2s infinite alternate;
+        }
+
+        .visualizer {
+            height: 100px;
+            margin-bottom: 30px;
+            background: linear-gradient(45deg, #00ff99, #003399);
+            border-radius: 10px;
+            box-shadow: 0px 0px 20px rgba(0, 255, 153, 0.5), 0px 0px 40px rgba(0, 51, 153, 0.5);
+            position: relative;
+        }
+
+        #visualizerCanvas {
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .control-btn {
+            padding: 15px;
+            background: linear-gradient(135deg, #292929, #1e1e1e);
+            border: none;
+            border-radius: 50%;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s, box-shadow 0.2s;
+        }
+
+        .glow-on-hover:hover {
+            background-color: #00cc7a;
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(0, 204, 122, 0.8);
+        }
+
+        .info {
+            margin-top: 20px;
+            animation: fadeIn 1s ease-out;
+        }
+
+        .status {
+            font-size: 1.2rem;
+            color: #00ffcc;
+            margin-top: 10px;
+        }
+
+        .song-info {
+            margin-top: 20px;
+            background: rgba(32, 32, 32, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.6);
+        }
+
+        .loading .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #00ffcc;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes fadeInUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes flicker {
+            0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 1; }
+            20%, 22%, 24%, 55% { opacity: 0.5; }
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="player-container">
+        <header class="player-header">
+            <h1 class="neon-text">Tunacity</h1>
+        </header>
+        <div class="visualizer" id="visualizer">
+            <canvas id="visualizerCanvas" width="600" height="100"></canvas>
+        </div>
+        <main class="controls">
+            <button class="control-btn glow-on-hover" id="recordBtn" onclick="startRecording()" aria-label="Record Audio">
+                <i class="fas fa-microphone"></i>
+            </button>
+            <button class="control-btn glow-on-hover" id="downloadBtn" onclick="downloadSong()" style="display:none;" aria-label="Download Song">
+                <i class="fas fa-download"></i>
+            </button>
+        </main>
+        <div class="info">
+            <p class="status" id="status">Made By Debojeet Bhowmick</p>
+            <div class="song-info" id="song-info"></div>
+            <div class="loading" id="loading" style="display:none;">
+                <div class="spinner"></div> Processing...
+            </div>
+        </div>
+    </div>
+
+    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.2/socket.io.min.js"></script>
+    <script src="https://kit.fontawesome.com/a076d05399.js"></script>
+    <script>
+        const socket = io();
+
+        socket.on('status_update', function(data) {
+            document.getElementById('status').innerText = data.status;
+        });
+
+        let mediaRecorder;
+        let audioStream;
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let animationFrameId;
+
+        async function startRecording() {
+            document.getElementById('status').innerText = 'Capturing...';
+            document.getElementById('loading').style.display = 'block';
+            
+            try {
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                mediaRecorder = new MediaRecorder(audioStream);
+                const chunks = [];
+                
+                mediaRecorder.ondataavailable = event => chunks.push(event.data);
+                mediaRecorder.onstop = async () => {
+
+                    const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+                    
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob, 'recorded_audio.wav');
+                    
+                    const response = await fetch('/upload-audio', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        document.getElementById('song-info').innerHTML = `<strong>Song:</strong> ${data.songTitle} by ${data.artist}`;
+                        document.getElementById('status').innerText = 'Capturing complete!';
+                        document.getElementById('downloadBtn').style.display = 'block';
+                    } else {
+                        document.getElementById('status').innerText = 'Song not recognized.';
+                    }
+                    
+                    audioStream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start();
+                setupVisualizer(audioStream);
+                setTimeout(() => mediaRecorder.stop(), 5000);
+                
+            } catch (error) {
+                console.error('Error during capturing:', error);
+                document.getElementById('status').innerText = 'An error occurred during capturing.';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function setupVisualizer(stream) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            
+            const bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            
+            source.connect(analyser);
+            
+            drawVisualizer();
+        }
+
+        function drawVisualizer() {
+            const canvas = document.getElementById('visualizerCanvas');
+            const canvasCtx = canvas.getContext('2d');
+            const WIDTH = canvas.width;
+            const HEIGHT = canvas.height;
+
+            function draw() {
+                analyser.getByteTimeDomainData(dataArray);
+
+                canvasCtx.fillStyle = 'rgb(0, 0, 0)';
+                canvasCtx.fillRect(0, 0, WIDTH, HEIGHT);
+
+                canvasCtx.lineWidth = 2;
+                canvasCtx.strokeStyle = 'rgb(0, 255, 153)';
+                
+                canvasCtx.beginPath();
+
+                let sliceWidth = WIDTH * 1.0 / dataArray.length;
+                let x = 0;
+
+                for (let i = 0; i < dataArray.length; i++) {
+                    let v = dataArray[i] / 128.0;
+                    let y = v * HEIGHT / 2;
+
+                    if (i === 0) {
+                        canvasCtx.moveTo(x, y);
+                    } else {
+                        canvasCtx.lineTo(x, y);
+                    }
+
+                    x += sliceWidth;
+                }
+
+                canvasCtx.lineTo(WIDTH, HEIGHT / 2);
+                canvasCtx.stroke();
+
+                animationFrameId = requestAnimationFrame(draw);
+            }
+
+            draw();
+        }
+
+        function stopMicrophone() {
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        }
+
+        async function downloadSong() {
+            const response = await fetch('/download-song');
+            if (response.status === 200) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'downloaded_song.mp3';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.getElementById('status').innerText = 'Download started!';
+            } else {
+                document.getElementById('status').innerText = 'Download failed.';
+            }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            stopMicrophone();
+        });
+    </script>
+</body>
+</html>
