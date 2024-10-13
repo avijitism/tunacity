@@ -82,4 +82,4 @@ def download_song(song_title, artist):
         return None
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=False, host='0.0.0.0')
