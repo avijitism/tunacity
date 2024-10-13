@@ -1,0 +1,5 @@
+wave
+shazamio
+yt_dlp
+requests
+flask
