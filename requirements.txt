@@ -3,6 +3,5 @@ shazamio
 yt_dlp
 requests
 flask
-pyaudio
 gunicorn
 waitress
