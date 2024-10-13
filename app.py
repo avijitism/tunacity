@@ -81,5 +81,5 @@ def download_song(song_title, artist):
         print(f"Error downloading song: {str(e)}")
         return None
 
-if __name__ == "__main__":
-    app.run(debug=False, host='0.0.0.0')
+# if __name__ == "__main__":
+#     app.run(debug=False, host='0.0.0.0')
