@@ -5,8 +5,11 @@ import io
 from shazamio import Shazam
 import yt_dlp
 from flask import Flask, make_response, request, jsonify, send_file, render_template
+from flask_cors import CORS
+
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/')
 def index():
@@ -74,5 +77,6 @@ async def download_song(song_title, artist):
         print(f"Error downloading song: {str(e)}")
         return None
 
-# if __name__ == "__main__":
-#     app.run(debug=True)
+if __name__ == "__main__":
+    socketio.run(app, host='0.0.0.0', port=10000)
+
