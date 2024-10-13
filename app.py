@@ -1,125 +1,85 @@
+import wave
+import asyncio
+from shazamio import Shazam
+import yt_dlp
 import os
 import re
-import asyncio
-import yt_dlp
 import requests
-from shazamio import Shazam
-from flask import Flask, request, render_template, redirect, url_for, flash, send_file
 from urllib.parse import quote
+from flask import Flask, make_response, request, jsonify, send_file, render_template, url_for
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['DOWNLOAD_FOLDER'] = 'static/downloads'
 
-# Ensure directories exist
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
-if not os.path.exists(app.config['DOWNLOAD_FOLDER']):
-    os.makedirs(app.config['DOWNLOAD_FOLDER'])
-
-
-def sanitize_filename(filename):
-    """Sanitize filename to prevent filesystem issues."""
-    return re.sub(r'[\\/*?:"<>|]', "", filename)
-
-
-# Main route for the app, where users upload audio files
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    if request.method == 'POST':
-        if 'audio_file' not in request.files:
-            flash('No file selected')
-            return redirect(request.url)
-
-        file = request.files['audio_file']
-        if file.filename == '':
-            flash('No file selected')
-            return redirect(request.url)
-
-        if file:
-            # Save file to the upload folder
-            filename = sanitize_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-
-            # Recognize song asynchronously
-            result = asyncio.run(recognize_song(file_path))
-
-            if result and 'track' in result:
-                song_title = result['track']['title']
-                artist = result['track']['subtitle']
-                flash(f"Recognized: {song_title} by {artist}")
-
-                # Redirect to the download route to download song
-                return redirect(url_for('download_song', song_title=song_title, artist=artist))
-            else:
-                flash("Sorry, the song could not be recognized.")
-                return redirect(request.url)
-
     return render_template('index.html')
 
+UPLOAD_FOLDER = 'uploads'
+DOWNLOAD_FOLDER = 'downloads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+
+@app.route('/upload-audio', methods=['POST'])
+def upload_audio():
+    if 'audio' not in request.files:
+        return jsonify({"success": False, "message": "No audio file uploaded"}), 400
+
+    audio_file = request.files['audio']
+    file_path = os.path.join(UPLOAD_FOLDER, 'recorded_audio.wav')
+    audio_file.save(file_path)
+
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(recognize_song(file_path))
+
+    if result:
+        song_title = result['track']['title']
+        artist = result['track']['subtitle']
+        downloaded_file = download_song(song_title, artist)
+        if downloaded_file:
+            return jsonify({"success": True, "songTitle": song_title, "artist": artist}), 200
+        else:
+            return jsonify({"success": False, "message": "Song download failed"}), 500
+    else:
+        return jsonify({"success": False, "message": "Song not recognized"}), 400
+
+@app.route('/download-song', methods=['GET'])
+def download_song_route():
+    file_path = os.path.join(DOWNLOAD_FOLDER, "downloaded_song.mp3")
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True)
+    else:
+        return jsonify({"success": False, "message": "File not found"}), 404
 
 async def recognize_song(file_path):
-    """Uses Shazam API to recognize the song."""
     shazam = Shazam()
     try:
-        return await shazam.recognize(file_path)
+        out = await shazam.recognize(file_path)
+        return out
     except Exception as e:
-        flash(f"Error recognizing song: {str(e)}")
+        print(f"Error recognizing song: {str(e)}")
         return None
 
-
-@app.route('/download')
-def download_song():
-    """Download song based on the recognized title and artist."""
-    song_title = request.args.get('song_title')
-    artist = request.args.get('artist')
-
-    # Search for the song on YouTube and download the audio
-    try:
-        download_path = download_from_youtube(song_title, artist)
-        return send_file(download_path, as_attachment=True)
-    except Exception as e:
-        flash(f"Error downloading the song: {str(e)}")
-        return redirect(url_for('index'))
-
-
-def download_from_youtube(song_title, artist):
-    """Downloads the audio track from YouTube."""
-    search_query = f"{song_title} {artist} lyrics"
-    query = quote(search_query)
-    url = f"https://www.youtube.com/results?search_query={query}"
-
-    # Search YouTube for the song
-    response = requests.get(url)
-    video_id = re.search(r"watch\?v=(\S{11})", response.text)
-
-    if not video_id:
-        raise Exception("YouTube video not found for the song.")
-
-    video_url = f"https://www.youtube.com/watch?v={video_id.group(1)}"
-    sanitized_title = sanitize_filename(f"{song_title} - {artist or 'Unknown Artist'}")
-
-    # Path to save the mp3
-    download_dir = app.config['DOWNLOAD_FOLDER']
+def download_song(song_title, artist):
+    search_query = f'{song_title} {artist} lyrics'
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': os.path.join(download_dir, f"{sanitized_title}.%(ext)s"),
+        'outtmpl': os.path.join(DOWNLOAD_FOLDER, 'downloaded_song.%(ext)s'),
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'quiet': True
     }
 
-    # Download the audio using yt-dlp
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f'ytsearch:{search_query}'])
+            return os.path.join(DOWNLOAD_FOLDER, 'downloaded_song.mp3')
+    except Exception as e:
+        print(f"Error downloading song: {str(e)}")
+        return None
 
-    # Return the path of the downloaded mp3
-    return os.path.join(download_dir, f"{sanitized_title}.mp3")
-
-# Uncomment below if you want to run this locally
 # if __name__ == "__main__":
-#     app.run(debug=False, host='0.0.0.0')
+#     app.run()
