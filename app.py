@@ -1,12 +1,9 @@
 import wave
 import asyncio
+import io
 from shazamio import Shazam
 import yt_dlp
-import os
-import re
-import requests
-from urllib.parse import quote
-from flask import Flask, make_response, request, jsonify, send_file, render_template, url_for
+from flask import Flask, make_response, request, jsonify, send_file, render_template
 
 app = Flask(__name__)
 
@@ -14,29 +11,21 @@ app = Flask(__name__)
 def index():
     return render_template('index.html')
 
-UPLOAD_FOLDER = 'uploads'
-DOWNLOAD_FOLDER = 'downloads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
-
 @app.route('/upload-audio', methods=['POST'])
-def upload_audio():
+async def upload_audio():
     if 'audio' not in request.files:
         return jsonify({"success": False, "message": "No audio file uploaded"}), 400
 
     audio_file = request.files['audio']
-    file_path = os.path.join(UPLOAD_FOLDER, 'recorded_audio.wav')
-    audio_file.save(file_path)
+    audio_data = audio_file.read()  # Read audio data into memory
 
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(recognize_song(file_path))
+    # Recognize song asynchronously
+    result = await recognize_song(audio_data)
 
     if result:
         song_title = result['track']['title']
         artist = result['track']['subtitle']
-        downloaded_file = download_song(song_title, artist)
+        downloaded_file = await download_song(song_title, artist)  # Await download process
         if downloaded_file:
             return jsonify({"success": True, "songTitle": song_title, "artist": artist}), 200
         else:
@@ -46,26 +35,28 @@ def upload_audio():
 
 @app.route('/download-song', methods=['GET'])
 def download_song_route():
-    file_path = os.path.join(DOWNLOAD_FOLDER, "downloaded_song.mp3")
+    file_path = os.path.join('downloads', "downloaded_song.mp3")
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     else:
         return jsonify({"success": False, "message": "File not found"}), 404
 
-async def recognize_song(file_path):
+async def recognize_song(audio_data):
+    """ Recognize song from audio file """
     shazam = Shazam()
     try:
-        out = await shazam.recognize(file_path)
+        out = await shazam.recognize_song(io.BytesIO(audio_data))  # Pass in-memory BytesIO object
         return out
     except Exception as e:
         print(f"Error recognizing song: {str(e)}")
         return None
 
-def download_song(song_title, artist):
+async def download_song(song_title, artist):
+    """ Download song from YouTube using yt-dlp """
     search_query = f'{song_title} {artist} lyrics'
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': os.path.join(DOWNLOAD_FOLDER, 'downloaded_song.%(ext)s'),
+        'outtmpl': '-',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -75,11 +66,12 @@ def download_song(song_title, artist):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f'ytsearch:{search_query}'])
-            return os.path.join(DOWNLOAD_FOLDER, 'downloaded_song.mp3')
+            info_dict = ydl.extract_info(f'ytsearch:{search_query}', download=False)
+            video_url = info_dict['entries'][0]['url']
+            return video_url
     except Exception as e:
         print(f"Error downloading song: {str(e)}")
         return None
 
 # if __name__ == "__main__":
-#     app.run()
+#     app.run(debug=True)
