@@ -3,5 +3,6 @@ shazamio
 yt_dlp
 requests
 flask
+flask_cors
 gunicorn
 waitress
