@@ -3,3 +3,4 @@ shazamio
 yt_dlp
 requests
 flask
+gunicorn
