@@ -1,12 +1,8 @@
-import wave
 import asyncio
 from shazamio import Shazam
 import yt_dlp
 import os
-import re
-import requests
-from urllib.parse import quote
-from flask import Flask, make_response, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 
 app = Flask(__name__)
