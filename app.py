@@ -1,8 +1,8 @@
 import asyncio
+import io
 from shazamio import Shazam
 import yt_dlp
-import os
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -12,23 +12,19 @@ CORS(app, resources={r"/*": {"origins": "https://beatsnatch.onrender.com"}})
 def index():
     return render_template('index.html')
 
-UPLOAD_FOLDER = 'uploads'
-DOWNLOAD_FOLDER = 'downloads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
-
 @app.route('/upload-audio', methods=['POST'])
 def upload_audio():
     if 'audio' not in request.files:
         return jsonify({"success": False, "message": "No audio file uploaded"}), 400
 
     audio_file = request.files['audio']
-    file_path = os.path.join(UPLOAD_FOLDER, 'recorded_audio.wav')
-    audio_file.save(file_path)
+    
+    # Use an in-memory stream instead of saving to disk
+    audio_bytes = io.BytesIO(audio_file.read())
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(recognize_song(file_path))
+    result = loop.run_until_complete(recognize_song(audio_bytes))
 
     if result:
         song_title = result['track']['title']
@@ -41,18 +37,11 @@ def upload_audio():
     else:
         return jsonify({"success": False, "message": "Song not recognized"}), 400
 
-@app.route('/download-song', methods=['GET'])
-def download_song_route():
-    file_path = os.path.join(DOWNLOAD_FOLDER, "downloaded_song.mp3")
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True)
-    else:
-        return jsonify({"success": False, "message": "File not found"}), 404
-
-async def recognize_song(file_path):
+async def recognize_song(audio_bytes):
     shazam = Shazam()
     try:
-        out = await shazam.recognize(file_path)
+        # Use the in-memory bytes stream for recognition
+        out = await shazam.recognize(audio_bytes)
         return out
     except Exception as e:
         print(f"Error recognizing song: {str(e)}")
@@ -62,7 +51,7 @@ def download_song(song_title, artist):
     search_query = f'{song_title} {artist} lyrics'
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': os.path.join(DOWNLOAD_FOLDER, 'downloaded_song.%(ext)s'),
+        'outtmpl': 'downloads/downloaded_song.%(ext)s',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -73,10 +62,10 @@ def download_song(song_title, artist):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([f'ytsearch:{search_query}'])
-            return os.path.join(DOWNLOAD_FOLDER, 'downloaded_song.mp3')
+            return 'downloads/downloaded_song.mp3'
     except Exception as e:
         print(f"Error downloading song: {str(e)}")
         return None
 
-if __name__ == "__main__":
-    app.run()
+# if __name__ == "__main__":
+#     app.run()

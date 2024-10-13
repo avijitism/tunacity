@@ -131,7 +131,6 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
-
     </style>
 </head>
 <body>
@@ -152,7 +151,7 @@
         </main>
         <div class="info">
             <p class="status" id="status">Made By Debojeet Bhowmick</p>
-            <p class="status" id="status"><a href="https://debojeet-bhowmick.netlify.app/" class="go-back">Visit My Website</a></p>
+            <p class="status"><a href="https://debojeet-bhowmick.netlify.app/" class="go-back">Visit My Website</a></p>
             <div class="song-info" id="song-info"></div>
             <div class="loading" id="loading" style="display:none;">
                 <div class="spinner"></div> Processing...
@@ -181,14 +180,14 @@
             document.getElementById('loading').style.display = 'block';
 
             try {
-                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const mediaRecorder = new MediaRecorder(audioStream);
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(audioStream);
                 const chunks = [];
 
                 mediaRecorder.ondataavailable = event => chunks.push(event.data);
 
                 mediaRecorder.onstop = async () => {
-                    const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+                    const audioBlob = new Blob(chunks, { type: 'audio/wav' });  // Adjusted the type if necessary
                     const formData = new FormData();
                     formData.append('audio', audioBlob, 'recorded_audio.wav');
 
@@ -197,6 +196,8 @@
                         body: formData
                     });
                     const data = await response.json();
+
+                    document.getElementById('loading').style.display = 'none';  // Hide loading spinner here
 
                     if (data.success) {
                         document.getElementById('song-info').innerHTML = `<strong>Song:</strong> ${data.songTitle} by ${data.artist}`;
@@ -212,11 +213,9 @@
             } catch (error) {
                 console.error('Error during capturing:', error);
                 document.getElementById('status').innerText = 'An error occurred during capturing.';
-            } finally {
-                document.getElementById('loading').style.display = 'none';
+                document.getElementById('loading').style.display = 'none';  // Ensure loading is hidden on error
             }
         }
-
 
         function setupVisualizer(stream) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
