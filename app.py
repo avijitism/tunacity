@@ -1,71 +1,84 @@
+import os
 import asyncio
-import io
+from flask import Flask, render_template, request, jsonify, send_file
 from shazamio import Shazam
 import yt_dlp
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
+import subprocess
+import tempfile
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://beatsnatch.onrender.com"}})
+
+# Ensure upload folder exists
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/upload-audio', methods=['POST'])
-def upload_audio():
-    if 'audio' not in request.files:
-        return jsonify({"success": False, "message": "No audio file uploaded"}), 400
+@app.route('/upload', methods=['POST'])
+async def upload_audio():
+    if 'audio_data' not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
 
-    audio_file = request.files['audio']
-    
-    # Use an in-memory stream instead of saving to disk
-    audio_bytes = io.BytesIO(audio_file.read())
+    # Save the uploaded audio file
+    audio_file = request.files['audio_data']
+    file_path = os.path.join(UPLOAD_FOLDER, audio_file.filename)
+    audio_file.save(file_path)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(recognize_song(audio_bytes))
-
-    if result:
-        song_title = result['track']['title']
-        artist = result['track']['subtitle']
-        downloaded_file = download_song(song_title, artist)
-        if downloaded_file:
-            return jsonify({"success": True, "songTitle": song_title, "artist": artist}), 200
+    # Recognize song using Shazam
+    try:
+        result = await recognize_song(file_path)
+        if 'track' in result:
+            song_title = result['track']['title']
+            artist = result['track']['subtitle']
+            return jsonify({"song_title": song_title, "artist": artist})
         else:
-            return jsonify({"success": False, "message": "Song download failed"}), 500
-    else:
-        return jsonify({"success": False, "message": "Song not recognized"}), 400
+            return jsonify({"error": "Song not recognized"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
-async def recognize_song(audio_bytes):
+async def recognize_song(file_path):
     shazam = Shazam()
     try:
-        # Use the in-memory bytes stream for recognition
-        out = await shazam.recognize(audio_bytes)
-        return out
+        result = await shazam.recognize(file_path)
+        return result
     except Exception as e:
-        print(f"Error recognizing song: {str(e)}")
-        return None
+        raise e
 
-def download_song(song_title, artist):
-    search_query = f'{song_title} {artist} lyrics'
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'downloads/downloaded_song.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-    }
+@app.route('/download', methods=['POST'])
+def download_song():
+    data = request.get_json()
+    song_title = data.get("song_title")
+    artist = data.get("artist")
 
+    if not song_title or not artist:
+        return jsonify({"error": "Invalid song information"}), 400
+
+    # Search and download the song using yt-dlp
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f'ytsearch:{search_query}'])
-            return 'downloads/downloaded_song.mp3'
-    except Exception as e:
-        print(f"Error downloading song: {str(e)}")
-        return None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            download_path = os.path.join(tmpdir, f"{song_title}.mp3")
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': download_path,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }]
+            }
 
-# if __name__ == "__main__":
-#     app.run()
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"ytsearch:{song_title} {artist}"])
+
+            return send_file(download_path, as_attachment=True, download_name=f"{song_title}.mp3")
+    except Exception as e:
+        return jsonify({"error": f"Failed to download song: {str(e)}"}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)

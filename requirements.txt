@@ -1,8 +1,4 @@
-wave
-shazamio
-yt_dlp
-requests
-flask
-flask_cors
-gunicorn
-waitress
+Flask==2.2.5
+shazamio==0.1.9
+yt-dlp==2023.7.1
+gunicorn==20.1.0
