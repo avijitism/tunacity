@@ -1,9 +1,7 @@
 import os
-import asyncio
 from flask import Flask, render_template, request, jsonify, send_file
 from shazamio import Shazam
 import yt_dlp
-import subprocess
 import tempfile
 
 app = Flask(__name__)
